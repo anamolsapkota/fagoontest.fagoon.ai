@@ -3,20 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WhatsApp Business API Setup</title>
+    <title>Automated WhatsApp Business API Setup</title>
     <script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
 </head>
 <body>
-    <h2>WhatsApp API - Embedded Signup & Message Sending</h2>
-    <button onclick="startEmbeddedSignup()">Start WhatsApp Signup</button>
+    <h2>Automated WhatsApp Business API Setup</h2>
+    <button onclick="startEmbeddedSignup()">Start Setup</button>
     <p id="status">Status: Waiting...</p>
 
     <script>
+        let accessToken = "";
+        let phoneNumberId = "";
+        let wabaId = "";
+
         // ✅ Step 1: Load Facebook SDK & Initialize
         window.fbAsyncInit = function() {
             FB.init({
                 appId: '860607322598076',  // 🔹 Replace with your Facebook App ID
-                version: 'v18.0',
+                version: 'v22.0',
                 xfbml: true
             });
         };
@@ -34,18 +38,19 @@
             }, { scope: 'business_management,whatsapp_business_management,whatsapp_business_messaging' });
         }
 
-        // ✅ Step 3: Exchange Authorization Code for Access Token
+        // ✅ Step 3: Exchange Auth Code for Access Token (Automatic)
         async function exchangeAuthCode(authCode) {
-            const url = `https://graph.facebook.com/v18.0/oauth/access_token?client_id=YOUR_APP_ID&client_secret=YOUR_APP_SECRET&redirect_uri=YOUR_REDIRECT_URI&code=${authCode}`;
+            const url = `https://graph.facebook.com/v22.0/oauth/access_token?client_id=YOUR_APP_ID&client_secret=YOUR_APP_SECRET&redirect_uri=YOUR_REDIRECT_URI&code=${authCode}`;
 
             try {
                 let response = await fetch(url, { method: "POST" });
                 let data = await response.json();
 
                 if (data.access_token) {
-                    console.log("Access Token Received:", data.access_token);
-                    document.getElementById("status").innerText = "Access Token Acquired. Verifying WhatsApp Number...";
-                    verifyPhoneNumber(data.access_token);
+                    accessToken = data.access_token;
+                    console.log("Access Token Received:", accessToken);
+                    document.getElementById("status").innerText = "Access Token Acquired. Fetching WhatsApp Details...";
+                    fetchWhatsAppDetails();
                 } else {
                     console.error("Error Getting Access Token:", data);
                     document.getElementById("status").innerText = "Error Getting Access Token.";
@@ -55,12 +60,77 @@
             }
         }
 
-        // ✅ Step 4: Verify WhatsApp Phone Number
-        async function verifyPhoneNumber(accessToken) {
-            const PHONE_NUMBER_ID = "569845666215174";  // 🔹 Replace with the client's WhatsApp Business number ID
-            const OTP_CODE = "YOUR_OTP_CODE";  // 🔹 Replace with the 6-digit code received via SMS
+        // ✅ Step 4: Fetch WhatsApp Business Details Automatically
+        async function fetchWhatsAppDetails() {
+            const url = `https://graph.facebook.com/v22.0/me/businesses?access_token=${accessToken}`;
 
-            const url = `https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/account/verify`;
+            try {
+                let response = await fetch(url);
+                let data = await response.json();
+
+                if (data.data && data.data.length > 0) {
+                    wabaId = data.data[0].id;
+                    console.log("WABA ID:", wabaId);
+
+                    // Get WhatsApp Phone Number ID
+                    const phoneUrl = `https://graph.facebook.com/v22.0/${wabaId}/phone_numbers?access_token=${accessToken}`;
+                    let phoneResponse = await fetch(phoneUrl);
+                    let phoneData = await phoneResponse.json();
+
+                    if (phoneData.data && phoneData.data.length > 0) {
+                        phoneNumberId = phoneData.data[0].id;
+                        console.log("Phone Number ID:", phoneNumberId);
+                        document.getElementById("status").innerText = "WhatsApp Number Found. Verifying...";
+                        requestOTP();
+                    } else {
+                        console.error("No WhatsApp Phone Number Found.");
+                        document.getElementById("status").innerText = "No WhatsApp Phone Number Found.";
+                    }
+                } else {
+                    console.error("No Business Account Found.");
+                    document.getElementById("status").innerText = "No WhatsApp Business Account Found.";
+                }
+            } catch (error) {
+                console.error("Error:", error);
+            }
+        }
+
+        // ✅ Step 5: Request OTP for WhatsApp Number (Automatic)
+        async function requestOTP() {
+            const url = `https://graph.facebook.com/v22.0/${phoneNumberId}/request_code`;
+            const payload = { code_method: "SMS" };
+
+            try {
+                let response = await fetch(url, {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${accessToken}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                let data = await response.json();
+                if (data.success) {
+                    console.log("OTP Requested. Waiting for verification...");
+                    document.getElementById("status").innerText = "OTP Sent. Waiting for Verification...";
+                    verifyOTP();  // Move to OTP verification
+                } else {
+                    console.error("OTP Request Failed:", data);
+                    document.getElementById("status").innerText = "OTP Request Failed.";
+                }
+            } catch (error) {
+                console.error("Error:", error);
+            }
+        }
+
+        // ✅ Step 6: Verify OTP & Activate WhatsApp Number
+        async function verifyOTP() {
+            const url = `https://graph.facebook.com/v22.0/${phoneNumberId}/account/verify`;
+            
+            // ⚠️ Replace with code from the SMS received automatically
+            const OTP_CODE = await getReceivedOTP();  
+
             const payload = { code: OTP_CODE };
 
             try {
@@ -77,7 +147,7 @@
                 if (data.success) {
                     console.log("Phone Verified:", data);
                     document.getElementById("status").innerText = "Phone Verified. Ready to Send Messages!";
-                    sendWhatsAppMessage(accessToken);
+                    sendWhatsAppMessage();
                 } else {
                     console.error("Verification Failed:", data);
                     document.getElementById("status").innerText = "Phone Verification Failed.";
@@ -87,17 +157,16 @@
             }
         }
 
-        // ✅ Step 5: Send a WhatsApp Message
-        async function sendWhatsAppMessage(accessToken) {
-            const PHONE_NUMBER_ID = "475668095641083";  // 🔹 Client's WhatsApp Business Number ID
-            const RECIPIENT_NUMBER = "+19027814062";  // 🔹 Replace with test phone number
+        // ✅ Step 7: Send a WhatsApp Message Automatically
+        async function sendWhatsAppMessage() {
+            const RECIPIENT_NUMBER = "YOUR_TEST_PHONE_NUMBER";  
 
-            const url = `https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`;
+            const url = `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`;
             const payload = {
                 messaging_product: "whatsapp",
                 to: RECIPIENT_NUMBER,
                 type: "text",
-                text: { body: "Hello! This is a test message from the WhatsApp Business API." }
+                text: { body: "Hello! This is an automated WhatsApp Business API message." }
             };
 
             try {
@@ -113,7 +182,7 @@
                 let data = await response.json();
                 if (data.messages) {
                     console.log("Message Sent:", data);
-                    document.getElementById("status").innerText = "Test Message Sent Successfully!";
+                    document.getElementById("status").innerText = "Message Sent Successfully!";
                 } else {
                     console.error("Message Sending Failed:", data);
                     document.getElementById("status").innerText = "Message Sending Failed.";
@@ -121,6 +190,11 @@
             } catch (error) {
                 console.error("Error:", error);
             }
+        }
+
+        // Mock function to simulate receiving OTP automatically
+        async function getReceivedOTP() {
+            return "123456";  // Replace with actual OTP retrieval mechanism
         }
     </script>
 </body>
